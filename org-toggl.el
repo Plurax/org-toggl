@@ -41,7 +41,7 @@
   :type 'integer
   :group 'toggl)
 
-(defvar toggl-api-url "https://api.track.toggl.com/api/v9/"
+(defvar toggl-api-url "https://track.toggl.com/api/v9/"
   "The URL for making API calls.")
 
 (defun toggl-create-api-url (string)
@@ -203,6 +203,7 @@ It is assumed that no two projects have the same name."
    (cl-function
     (lambda (&key data &allow-other-keys)
       (setq toggl-current-time-entry data)
+      (org-toggl-set-time-entry-data-at-point)
       (when show-message (message "Toggl time entry started."))))
    (cl-function
     (lambda (&key error-thrown &allow-other-keys)
@@ -215,17 +216,17 @@ It is assumed that no two projects have the same name."
     (let ((time-entry-id (alist-get 'id toggl-current-time-entry)))
       (toggl-request-patch
        (format "workspaces/%s/time_entries/%s/stop"
-	       (toggl-get-current-workspace-id)
-	       time-entry-id)
+	             (toggl-get-current-workspace-id)
+	             time-entry-id)
        (json-encode `(("time_entry_id" . ,time-entry-id)
-		      ("workspace_id" . ,(toggl-get-current-workspace-id))))
+		                  ("workspace_id" . ,(toggl-get-current-workspace-id))))
        nil
        (cl-function
-	(lambda (&key data &allow-other-keys)
-	  (when show-message (message "Toggl time entry stopped."))))
+	      (lambda (&key data &allow-other-keys)
+	        (when show-message (message "Toggl time entry stopped."))))
        (cl-function
-	(lambda (&key error-thrown &allow-other-keys)
-	  (when show-message (message "Stopping time entry failed because %s" error-thrown))))))
+	      (lambda (&key error-thrown &allow-other-keys)
+	        (when show-message (message "Stopping time entry failed because %s" error-thrown))))))
     (setq toggl-current-time-entry nil)))
 
 (defun toggl-delete-time-entry (&optional tid wsid show-message)
@@ -261,7 +262,17 @@ By default, delete the current one."
   (let* ((heading (substring-no-properties (org-get-heading t t t t)))
 	 (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
 	 (pid (toggl-get-pid project)))
-    (when pid (toggl-start-time-entry heading pid t))))
+    (when pid (toggl-start-time-entry heading pid t)
+               )))
+
+(defun org-toggl-set-time-entry-data-at-point ()
+  "Add time entry ID and workspace ID to the current org-mode heading."
+  (interactive)
+  (let ((time-id (cdr (assoc 'id toggl-current-time-entry)))
+        (workspace-id (cdr (assoc 'workspace_id toggl-current-time-entry)))
+        (element (org-element-at-point)))
+    (org-set-property "TOGGL_TIME_ENTRY_ID" (number-to-string time-id))
+    (org-set-property "TOGGL_WORKSPACE_ID" (number-to-string workspace-id))))
 
 (defun org-toggl-clock-out ()
   "Stop the running Toggle time entry."
@@ -281,42 +292,81 @@ By default, delete the current one."
   (interactive (list (completing-read "Toggl workspace to use: " toggl-workspaces nil t))) ; TODO: dry!
   (setq toggl-current-workspace workspace))
 
-(defun org-toggl-update-timestamp-at-point (&optional show-message)
+(defun org-toggl-update-timestamp-at-point ()
   "Update clock entry at point to Toggl."
   (interactive)
-  (let ((element (org-element-at-point)))
-    (if (eq (org-element-type element) 'clock)
-	(let* ((heading (substring-no-properties (org-get-heading t t t t)))
-	       (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
-	       (pid (or (toggl-get-pid project) toggl-default-project))
-	       (timestamp (org-element-property :value element))
-	       (year-start (org-element-property :year-start timestamp))
-	       (month-start (org-element-property :month-start timestamp))
-	       (day-start (org-element-property :day-start timestamp))
-	       (hour-start (org-element-property :hour-start timestamp))
-	       (minute-start (org-element-property :minute-start timestamp))
-	       (year-end (org-element-property :year-end timestamp))
-	       (month-end (org-element-property :month-end timestamp))
-	       (day-end (org-element-property :day-end timestamp))
-	       (hour-end (org-element-property :hour-end timestamp))
-	       (minute-end (org-element-property :minute-end timestamp))))
-	       (start-time (time-to-seconds (encode-time
-					     0
-					     minute-start
-					     hour-start
-					     day-start
-					     month-start
-					     year-start)))
-	       (stop-time (time-to-seconds (encode-time
-					    0
-					    minute-end
-					    hour-end
-					    day-end
-					    month-end
-					    year-end))))
-    (message (format "%s %s " start-time stop-time))
-  ))
+  (save-excursion
+    (when (eq (org-element-type (org-element-at-point)) 'clock)
+	    (let* ((element (org-element-at-point))
+             (heading (substring-no-properties (org-get-heading t t t t)))
+	           (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
+	           (pid (or (toggl-get-pid project) toggl-default-project))
+	           (timestamp (org-element-property :value element))
+	           (year-start (org-element-property :year-start timestamp))
+	           (month-start (org-element-property :month-start timestamp))
+	           (day-start (org-element-property :day-start timestamp))
+	           (hour-start (org-element-property :hour-start timestamp))
+	           (minute-start (org-element-property :minute-start timestamp))
+	           (year-end (org-element-property :year-end timestamp))
+	           (month-end (org-element-property :month-end timestamp))
+	           (day-end (org-element-property :day-end timestamp))
+	           (hour-end (org-element-property :hour-end timestamp))
+	           (minute-end (org-element-property :minute-end timestamp))
+             (ws-id (org-entry-get (point) "TOGGL_WORKSPACE_ID"))
+             (time-entry-id (org-entry-get (point) "TOGGL_TIME_ENTRY_ID"))
+             (req-url (format "workspaces/%s/time_entries/%s" ws-id time-entry-id))
+	           (start-time (time-to-seconds (encode-time
+					                                 0
+					                                 minute-start
+					                                 hour-start
+					                                 day-start
+					                                 month-start
+					                                 year-start)))
+	           (stop-time (time-to-seconds (encode-time
+					                                0
+					                                minute-end
+					                                hour-end
+					                                day-end
+					                                month-end
+					                                year-end))))
+	      (toggl-request-put
+         req-url
+         (json-encode `(("description" . ,heading)
+		                    ("project_id" . ,pid)
+		                    ("created_with" . "mbork's Emacs toggl client")
+		                    ("start" . ,(format-time-string "%FT%TZ" start-time t))
+		                    ("stop" . ,(format-time-string "%FT%TZ" stop-time t))
+                        ))
+         nil
+         (cl-function
+          (lambda (&key data &allow-other-keys)
+	          (message "Toggl time entry updated.")
+	          ))
+         (cl-function
+          (lambda (&key error-thrown &allow-other-keys)
+	          (message "Updating time entry failed because %s %s" error-thrown req-url))))
+        ))))
 
+(defun org-toggl-delete-time-entry-at-point ()
+  "Delete time entry at point."
+  (interactive)
+  (save-excursion
+	  (let* ((element (org-element-at-point))
+           (ws-id (org-entry-get (point) "TOGGL_WORKSPACE_ID"))
+           (time-entry-id (org-entry-get (point) "TOGGL_TIME_ENTRY_ID")))
+      (toggl-request-delete
+       (format "workspaces/%s/time_entries/%s" ws-id time-entry-id)
+       nil
+       (cl-function
+        (lambda (&key data &allow-other-keys)
+	        (when (= tid (alist-get 'id (alist-get 'data toggl-current-time-entry)))
+	          (setq toggl-current-time-entry nil))
+	        (message "Toggl time entry deleted.")))
+       (cl-function
+        (lambda (&key error-thrown &allow-other-keys)
+	        (message "Deleting time entry failed because %s" error-thrown))))
+      )))
+    
 (defun org-toggl-submit-clock-at-point (&optional show-message)
   "Submit the clock entry at point to Toggl."
   (interactive "p")
@@ -382,7 +432,8 @@ automatically."
 	(add-hook 'org-clock-cancel-hook #'org-toggl-clock-cancel))
     (remove-hook 'org-clock-in-hook #'org-toggl-clock-in)
     (remove-hook 'org-clock-out-hook #'org-toggl-clock-out)
-    (remove-hook 'org-clock-cancel-hook #'org-toggl-clock-cancel)))
+    (remove-hook 'org-clock-cancel-hook #'org-toggl-clock-cancel))
+  )
 
 (provide 'org-toggl)
 ;;; org-toggl.el ends here
