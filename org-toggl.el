@@ -329,23 +329,40 @@ By default, delete the current one."
 					                                day-end
 					                                month-end
 					                                year-end))))
-	      (toggl-request-put
-         req-url
-         (json-encode `(("description" . ,heading)
-		                    ("project_id" . ,pid)
-		                    ("created_with" . "mbork's Emacs toggl client")
-		                    ("start" . ,(format-time-string "%FT%TZ" start-time t))
-		                    ("stop" . ,(format-time-string "%FT%TZ" stop-time t))
-                        ))
-         nil
-         (cl-function
-          (lambda (&key data &allow-other-keys)
-	          (message "Toggl time entry updated.")
-	          ))
-         (cl-function
-          (lambda (&key error-thrown &allow-other-keys)
-	          (message "Updating time entry failed because %s %s" error-thrown req-url))))
-        ))))
+	      (if (eq (string-to-number (org-entry-get (point) "TOGGL_TIME_ENTRY_ID")) (cdr (assoc 'id toggl-current-time-entry)))
+            (toggl-request-put
+             req-url
+             (json-encode `(("description" . ,heading)
+		                        ("project_id" . ,pid)
+                            ("duration" . -1)
+		                        ("created_with" . "mbork's Emacs toggl client")
+		                        ("start" . ,(format-time-string "%FT%TZ" start-time t))
+                            ))
+             nil
+             (cl-function
+              (lambda (&key data &allow-other-keys)
+	              (message "Start time entry updated.")
+	              ))
+             (cl-function
+              (lambda (&key error-thrown &allow-other-keys)
+	              (message "Updating time entry failed because %s %s" error-thrown req-url))))
+          (toggl-request-put
+           req-url
+           (json-encode `(("description" . ,heading)
+		                      ("project_id" . ,pid)
+		                      ("created_with" . "mbork's Emacs toggl client")
+		                      ("start" . ,(format-time-string "%FT%TZ" start-time t))
+		                      ("stop" . ,(format-time-string "%FT%TZ" stop-time t))
+                          ))
+           nil
+           (cl-function
+            (lambda (&key data &allow-other-keys)
+	            (message "Toggl time entry updated.")
+	            ))
+           (cl-function
+            (lambda (&key error-thrown &allow-other-keys)
+	            (message "Updating time entry failed because %s %s" error-thrown req-url))))
+          )))))
 
 (defun org-toggl-delete-time-entry-at-point ()
   "Delete time entry at point."
