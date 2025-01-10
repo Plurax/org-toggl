@@ -41,6 +41,11 @@
   :type 'integer
   :group 'toggl)
 
+(defcustom toggl-default-workspace ""
+  "Default workspace."
+  :type 'string
+  :group 'toggl)
+
 (defvar toggl-api-url "https://track.toggl.com/api/v9/"
   "The URL for making API calls.")
 
@@ -260,8 +265,7 @@ By default, delete the current one."
   "Start a Toggl time entry based on current heading."
   (interactive)
   (let* ((heading (substring-no-properties (org-get-heading t t t t)))
-	 (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
-	 (pid (toggl-get-pid project)))
+	 (pid (string-to-number (org-entry-get (point) "toggl-project-id" org-toggl-inherit-toggl-properties))))
     (when pid (toggl-start-time-entry heading pid t)
                )))
 
@@ -285,7 +289,27 @@ By default, delete the current one."
 (defun org-toggl-set-project (project)
   "Save PROJECT in the properties of the current Org headline."
   (interactive (list (completing-read "Toggl project for this headline: " toggl-projects nil t))) ; TODO: dry!
-  (org-set-property "toggl-project" project))
+  (org-set-property "toggl-project" project)
+  (org-set-property "toggl-project-id" (number-to-string (cdr (assoc project toggl-projects)))))
+
+(defun org-toggl-update-project-props ()
+  "Ensure string and id properties are consistent in Org clock entries.
+If the ID property is not set, set it based on the string property.
+If the ID property exists, update the string property based on the ID."
+  (when (and (org-at-clock-log-p) (org-entry-get nil "toggl-project"))
+    (let* ((string-prop (org-entry-get nil "toggl-project"))
+           (id-prop (org-entry-get nil "toggl-project-id"))
+           (id (cdr (assoc string-prop toggl-projects))))
+      (if id-prop
+          ;; If ID is set, ensure STRING_PROP matches
+          (let ((expected-string (car (rassoc (string-to-number id-prop) toggl-projects))))
+            (when (and expected-string (not (string= string-prop expected-string)))
+              (org-set-property "toggl-project" expected-string)
+              (message "Updated toggl-project to '%s' based on toggl-project-id." expected-string)))
+        ;; If ID is not set, add it based on STRING_PROP
+        (when id
+          (org-set-property "toggl-project-id" (number-to-string id))
+          (message "Set toggl-project-id to '%d' based on toggl-project '%s'." id string-prop))))))
 
 (defun org-toggl-set-workspace (workspace)
   "Save WORKSPACE globally."
@@ -297,10 +321,11 @@ By default, delete the current one."
   (interactive)
   (save-excursion
     (when (eq (org-element-type (org-element-at-point)) 'clock)
+      (org-toggl-update-project-props)
 	    (let* ((element (org-element-at-point))
              (heading (substring-no-properties (org-get-heading t t t t)))
-	           (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
-	           (pid (or (toggl-get-pid project) toggl-default-project))
+	           (pid (string-to-number (org-entry-get (point) "toggl-project-id" org-toggl-inherit-toggl-properties)))
+;	           (pid (or (toggl-get-pid project) toggl-default-project))
 	           (timestamp (org-element-property :value element))
 	           (year-start (org-element-property :year-start timestamp))
 	           (month-start (org-element-property :month-start timestamp))
@@ -390,8 +415,7 @@ By default, delete the current one."
   (let ((element (org-element-at-point)))
     (if (eq (org-element-type element) 'clock)
 	(let* ((heading (substring-no-properties (org-get-heading t t t t)))
-	       (project (org-entry-get (point) "toggl-project" org-toggl-inherit-toggl-properties))
-	       (pid (or (toggl-get-pid project) toggl-default-project))
+	       (pid (string-to-number (org-entry-get (point) "toggl-project-id" org-toggl-inherit-toggl-properties)))
 	       (timestamp (org-element-property :value element))
 	       (year-start (org-element-property :year-start timestamp))
 	       (month-start (org-element-property :month-start timestamp))
